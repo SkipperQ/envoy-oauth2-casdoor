@@ -1,0 +1,89 @@
+static_resources:
+  listeners:
+  - name: listener_proxy
+
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 10000
+
+    filter_chains:
+    - filters:
+
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          route_config:
+            name: default
+            virtual_hosts:
+            - name: default
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: upstream
+
+          http_filters:
+          - name: envoy.filters.http.oauth2
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.oauth2.v3alpha.OAuth2
+              config:
+                token_endpoint:
+                  cluster: casdoor
+                  uri: http://<casdoor-server-address>/api/login/oauth/access_token
+                  timeout: 5s
+                authorization_endpoint:
+                    http://<casdoor-server-address>/login/oauth/authorize
+                redirect_uri: "http://%REQ(:authority)%/oauth2/callback"
+                redirect_path_matcher:
+                  path:
+                    exact: /oauth2/callback
+                signout_path:
+                  path:
+                    exact: /oauth2/signout
+                credentials:
+                  client_id: "200c96d5ce5299e76840"
+                  token_secret:
+                    name: token
+                    sds_config:
+                      path: "/etc/envoy/token-secret.yaml"
+                  hmac_secret:
+                    name: hmac
+                    sds_config:
+                      path: "/etc/envoy/hmac-secret.yaml"
+                forward_bearer_token: true
+                auth_scopes:
+                  - openid
+
+          - name: envoy.filters.http.router
+
+  clusters:
+  - name: casdoor
+    connect_timeout: 1s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: casdoor
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: casdoor
+                port_value: 8000
+
+  - name: upstream
+    connect_timeout: 1s
+    type: STRICT_DNS
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: upstream
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: upstream
+                port_value: 80
